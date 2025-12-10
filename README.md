@@ -1,9 +1,5 @@
-## Loading and combining BirdNET output .csv files
 
 ```
-#By Jack A. Greenhalgh. December, 2025.
-#Department of Biology, McGill University, 1205 Dr Penfield Ave, Montreal, Quebec, H3A 1B1, Canada.
-
 library(dplyr)
 library(readr)
 
@@ -135,7 +131,7 @@ head(combined_data)
 
 write.csv(combined_data, "combined_BirdNET_data.csv")
 
-#### Part 2. Rarefraction ####
+#### Part 2. Rarefaction ####
 
 combined_data <- read.csv("combined_BirdNET_data.csv")
 
@@ -217,6 +213,89 @@ Rarefaction <- ggplot(accum_df, aes(x = Samples, y = Richness, color = Recorder_
 
 ggsave("BirdNET Rarefaction.jpeg", plot = Rarefaction, device = "jpeg",
        width = 5, height = 5, units = "in", dpi = 300)
+
+#### Part 3. Heatmaps ####
+
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(ggplot2)
+library(viridis)
+
+# Load data
+combined_data <- read.csv("combined_BirdNET_data.csv")
+
+head(combined_data)
+
+# Ensure Datetime is POSIXct and extract Date and Hour
+combined_data <- combined_data %>%
+  mutate(
+    Datetime = parse_date_time(Datetime, orders = "Ymd_HMS"),  # parse YYYYMMDD_HHMMSS
+    Date = as.Date(Datetime),
+    Hour = hour(Datetime)
+  )
+
+# Call count
+
+# Aggregate call count per Habitat, Date, and Hour
+call_count_data <- combined_data %>%
+  filter(!is.na(Hour)) %>%               # Remove rows with NA Hour
+  group_by(Habitat, Date, Hour) %>%
+  summarise(CallCount = n(), .groups = "drop") %>%  # Count calls
+  mutate(HourLabel = sprintf("%02d:00", Hour))
+
+# Create complete grid to fill missing combinations with 0
+call_count_complete <- call_count_data %>%
+  complete(Habitat, Date, Hour, fill = list(CallCount = 0)) %>%
+  mutate(HourLabel = sprintf("%02d:00", Hour))
+
+# Plot heatmap of call counts
+p_callcount <- ggplot(call_count_complete, 
+                      aes(y = Date, x = factor(HourLabel, levels = sprintf("%02d:00", 0:23)), fill = CallCount)) +
+  geom_tile(color = NA) +  # remove tile borders
+  facet_wrap(~ Habitat, scales = "free_y") +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey90") +
+  scale_x_discrete(breaks = sprintf("%02d:00", seq(0, 23, by = 2))) +  # show every 2 hours
+  labs(y = "Date", x = "Hour of day", fill = "Call count") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(face = "bold"))
+
+print(p_callcount)
+
+ggsave("call_count_heatmap.jpeg", plot = p_callcount, device = "jpeg",
+       width = 10, height = 10, units = "in", dpi = 300)
+
+# Species richness
+
+# Aggregate species richness per Habitat, Date, and Hour
+richness_data <- combined_data %>%
+  filter(!is.na(Hour)) %>%                     # remove rows with NA Hour
+  group_by(Habitat, Date, Hour) %>%
+  summarise(SpeciesRichness = n_distinct(Scientific.name), .groups = "drop") %>%  # unique species count
+  mutate(HourLabel = sprintf("%02d:00", Hour))
+
+# Create complete grid to fill missing combinations with 0
+richness_complete <- richness_data %>%
+  complete(Habitat, Date, Hour, fill = list(SpeciesRichness = 0)) %>%
+  mutate(HourLabel = sprintf("%02d:00", Hour))
+
+# Plot heatmap of species richness
+p_richness <- ggplot(richness_complete, 
+                     aes(y = Date, x = factor(HourLabel, levels = sprintf("%02d:00", 0:23)), fill = SpeciesRichness)) +
+  geom_tile(color = NA) +  # remove tile borders
+  facet_wrap(~ Habitat, scales = "free_y") +
+  scale_fill_viridis_c(option = "plasma", na.value = "grey90") +
+  scale_x_discrete(breaks = sprintf("%02d:00", seq(0, 23, by = 2))) +  # show every 2 hours
+  labs(y = "Date", x = "Hour of day", fill = "Species richness") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text = element_text(face = "bold"))
+
+print(p_richness)
+
+ggsave("species_richness_heatmap.jpeg", plot = p_richness, device = "jpeg",
+       width = 10, height = 10, units = "in", dpi = 300)
 
 ```
 
