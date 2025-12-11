@@ -135,26 +135,26 @@ write.csv(combined_data, "combined_BirdNET_data.csv")
 
 combined_data <- read.csv("combined_BirdNET_data.csv")
 
-# ------------------------------------------------------------
+
 # Load libraries
-# ------------------------------------------------------------
+
 library(dplyr)
 library(vegan)
 
-# ------------------------------------------------------------
+
 # 1. Define each audio file as a "sample"
-# ------------------------------------------------------------
+
 BirdNET_Data <- BirdNET_Data %>%
   mutate(Sample = File)   # each WAV file = one sampling unit
 
-# ------------------------------------------------------------
+
 # 2. List unique recorder IDs
-# ------------------------------------------------------------
+
 recorders <- unique(BirdNET_Data$Recorder_ID)
 
-# ------------------------------------------------------------
+
 # 3. Build species × sample matrices for each recorder
-# ------------------------------------------------------------
+
 spec_matrices <- list()
 
 for (rec in recorders) {
@@ -168,9 +168,9 @@ for (rec in recorders) {
   spec_matrices[[rec]] <- mat
 }
 
-# ------------------------------------------------------------
+
 # 4. Plot rarefaction curves for each recorder ID
-# ------------------------------------------------------------
+
 # Adjust the panel layout depending on how many recorders you have
 n <- length(recorders)
 rows <- ceiling(n / 3)
@@ -296,6 +296,246 @@ print(p_richness)
 
 ggsave("species_richness_heatmap.jpeg", plot = p_richness, device = "jpeg",
        width = 10, height = 10, units = "in", dpi = 300)
+
+#### Part 4. Density time series plots ####
+
+combined_data <- read.csv("combined_BirdNET_data.csv")
+head(combined_data)
+
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+
+# If your datetime column is not POSIXct, convert it
+combined_data$Datetime <- as.POSIXct(combined_data$Datetime, format="%Y-%m-%d %H:%M:%S")
+
+# 1. Aggregate data by time intervals (e.g., daily)
+# You can also do hourly: floor_date(Datetime, "hour")
+species_time <- combined_data %>%
+  mutate(Date = as.Date(Datetime)) %>%  # Change to floor_date(Datetime, "hour") for hourly
+  group_by(Date, Scientific.name) %>%
+  summarise(Detections = n(), .groups = "drop")
+
+# 2. Calculate relative composition per time interval
+species_rel <- species_time %>%
+  group_by(Date) %>%
+  mutate(Relative = Detections / sum(Detections)) %>%
+  ungroup()
+
+# 3. Plot as stacked area plot
+ggplot(species_rel, aes(x = Date, y = Relative, fill = Scientific.name)) +
+  geom_area(alpha = 0.8 , color = "black", size = 0.2) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "Relative Bird Species Composition Over Time",
+    x = "Date",
+    y = "Relative Composition (%)",
+    fill = "Species"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+
+
+# 3. Plot as stacked area plot without legend
+ggplot(species_rel, aes(x = Date, y = Relative, fill = Scientific.name)) +
+  geom_area(alpha = 0.8 , color = "black", size = 0.2) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title = "",
+    x = "Date",
+    y = "Relative Composition (%)",
+    fill = "Species"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "none"  # removes the legend
+  )
+
+# top 10
+
+library(dplyr)
+library(lubridate)
+
+# 1. Add a week column
+species_rel <- species_rel %>%
+  mutate(Week = floor_date(Date, "week"))
+
+# 2. Aggregate relative composition per common name per week
+weekly_species <- combined_data %>%
+  mutate(Date = as.Date(Datetime),
+         Week = floor_date(Date, "week")) %>%
+  group_by(Week, Common.name) %>%
+  summarise(WeeklyDetections = n(), .groups = "drop") %>%
+  group_by(Week) %>%
+  mutate(Relative = WeeklyDetections / sum(WeeklyDetections)) %>%  # relative contribution per week
+  ungroup()
+
+# 3. Calculate total relative contribution per common name across all weeks
+total_contributions <- weekly_species %>%
+  group_by(Common.name) %>%
+  summarise(TotalRelative = sum(Relative), .groups = "drop") %>%
+  arrange(desc(TotalRelative))
+
+# 4. Select top 10 species by common name
+top10_species <- total_contributions %>%
+  slice_head(n = 10)
+
+# 5. Print top 10 species with their total relative contributions
+print(top10_species)
+
+# Optional: show weekly breakdown for only top 10 common names
+weekly_top10 <- weekly_species %>%
+  filter(Common.name %in% top10_species$Common.name) %>%
+  arrange(Week, desc(Relative))
+
+print(weekly_top10)
+head(weekly_top10)
+
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# Make sure Common.name is a factor ordered by total contribution
+top_species_order <- top10_species$Common.name
+
+weekly_top10 <- weekly_top10 %>%
+  mutate(Common.name = factor(Common.name, levels = top_species_order))
+
+# Plot weekly relative composition as a stacked area plot
+ggplot(weekly_top10, aes(x = Week, y = Relative, fill = Common.name)) +
+  geom_area(alpha = 0.8, color = "black", size = 0.2) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "",
+    x = "Week",
+    y = "Relative Composition (%)",
+    fill = "Species"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+# top 20
+
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(scales)
+
+# 1. Add a week column
+species_rel <- species_rel %>%
+  mutate(Week = floor_date(Date, "week"))
+
+# 2. Aggregate relative composition per common name per week
+weekly_species <- combined_data %>%
+  mutate(Date = as.Date(Datetime),
+         Week = floor_date(Date, "week")) %>%
+  group_by(Week, Common.name) %>%
+  summarise(WeeklyDetections = n(), .groups = "drop") %>%
+  group_by(Week) %>%
+  mutate(Relative = WeeklyDetections / sum(WeeklyDetections)) %>%  # relative contribution per week
+  ungroup()
+
+# 3. Calculate total relative contribution per common name across all weeks
+total_contributions <- weekly_species %>%
+  group_by(Common.name) %>%
+  summarise(TotalRelative = sum(Relative), .groups = "drop") %>%
+  arrange(desc(TotalRelative))
+
+# 4. Select top 20 species by common name
+top20_species <- total_contributions %>%
+  slice_head(n = 20)
+
+# 5. Optional: show weekly breakdown for only top 20 common names
+weekly_top20 <- weekly_species %>%
+  filter(Common.name %in% top20_species$Common.name) %>%
+  arrange(Week, desc(Relative))
+
+# Make sure Common.name is a factor ordered by total contribution
+weekly_top20 <- weekly_top20 %>%
+  mutate(Common.name = factor(Common.name, levels = top20_species$Common.name))
+
+# Plot weekly relative composition as a stacked area plot
+ggplot(weekly_top20, aes(x = Week, y = Relative, fill = Common.name)) +
+  geom_area(alpha = 0.8, color = "black", size = 0.2) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "",
+    x = "Week",
+    y = "Relative Composition (%)",
+    fill = "Species"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+# top 30 #
+
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(scales)
+
+# 1. Add a week column
+species_rel <- species_rel %>%
+  mutate(Week = floor_date(Date, "week"))
+
+# 2. Aggregate relative composition per common name per week
+weekly_species <- combined_data %>%
+  mutate(Date = as.Date(Datetime),
+         Week = floor_date(Date, "week")) %>%
+  group_by(Week, Common.name) %>%
+  summarise(WeeklyDetections = n(), .groups = "drop") %>%
+  group_by(Week) %>%
+  mutate(Relative = WeeklyDetections / sum(WeeklyDetections)) %>%  # relative contribution per week
+  ungroup()
+
+# 3. Calculate total relative contribution per common name across all weeks
+total_contributions <- weekly_species %>%
+  group_by(Common.name) %>%
+  summarise(TotalRelative = sum(Relative), .groups = "drop") %>%
+  arrange(desc(TotalRelative))
+
+# 4. Select top 30 species by common name
+top30_species <- total_contributions %>%
+  slice_head(n = 30)
+
+# 5. Optional: show weekly breakdown for only top 30 common names
+weekly_top30 <- weekly_species %>%
+  filter(Common.name %in% top30_species$Common.name) %>%
+  arrange(Week, desc(Relative))
+
+# Make sure Common.name is a factor ordered by total contribution
+weekly_top30 <- weekly_top30 %>%
+  mutate(Common.name = factor(Common.name, levels = top30_species$Common.name))
+
+# Plot weekly relative composition as a stacked area plot
+density_plot <- ggplot(weekly_top30, aes(x = Week, y = Relative, fill = Common.name)) +
+  geom_area(alpha = 0.8, color = "black", size = 0.2) +
+  scale_y_continuous(labels = percent_format()) +
+  labs(
+    title = "",
+    x = "Week",
+    y = "Relative Composition (%)",
+    fill = "Species"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+  )
+
+ggsave("density_plot.jpeg", plot = density_plot, width = 20, height = 10, units = "in", dpi = 300)
 
 ```
 
