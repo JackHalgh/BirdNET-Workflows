@@ -537,6 +537,170 @@ density_plot <- ggplot(weekly_top30, aes(x = Week, y = Relative, fill = Common.n
 
 ggsave("density_plot.jpeg", plot = density_plot, width = 20, height = 10, units = "in", dpi = 300)
 
+#### Part 5. Ordination #####
+
+# -------------------------------
+# Libraries
+# -------------------------------
+library(dplyr)
+library(tidyr)
+library(vegan)
+library(tibble)
+library(ggplot2)
+
+# -------------------------------------------------------------
+# 0) List of CSV files
+# -------------------------------------------------------------
+csv_files <- c(
+  "J001_Maple_Beech_Combined_Output_Combined_Results_Top_50.csv",
+  "J002_Oak_Combined_Output_Combined_Results_Top_50.csv",
+  "J003_Lake_Shore_Combined_Output_Combined_Results_Top_50.csv",
+  "M006_Beaver_Pond_Combined_Output_Combined_Results_Top_50.csv",
+  "M007_Wetland_Combined_Output_Combined_Results_Top_50.csv",
+  "M008_Oak_Combined_Output_Combined_Results_Top_50.csv",
+  "M009_Maple_Beech_Combined_Output_Combined_Results_Top_50.csv",
+  "M010_Beaver_Pond_Combined_Output_Combined_Results_Top_50.csv"
+)
+
+# -------------------------------------------------------------
+# 1) Read and combine all species-top50 CSVs
+# -------------------------------------------------------------
+all_data <- lapply(csv_files, function(file) {
+  df <- read.csv(file)
+  df$Site <- tools::file_path_sans_ext(basename(file))  # derive site ID from filename
+  df
+}) %>% bind_rows()
+
+# Clean column names: expect Common.name, n, Habitat
+all_data <- all_data %>%
+  rename(
+    Species = Common.name,
+    Count = n
+  )
+
+# -------------------------------------------------------------
+# 2) Build community matrix (species × site)
+# -------------------------------------------------------------
+comm_mat <- all_data %>%
+  select(Site, Species, Count) %>%
+  group_by(Site, Species) %>%
+  summarise(Count = sum(Count), .groups = "drop") %>%
+  pivot_wider(names_from = Species, values_from = Count, values_fill = 0) %>%
+  as.data.frame()
+
+row.names(comm_mat) <- comm_mat$Site
+comm_mat$Site <- NULL
+
+# -------------------------------------------------------------
+# 3) Build site metadata table
+# -------------------------------------------------------------
+site_meta <- all_data %>%
+  select(Site, Habitat) %>%
+  distinct()
+
+# Ensure community matrix rows follow metadata order
+comm_mat <- comm_mat[match(site_meta$Site, rownames(comm_mat)), ]
+
+# -------------------------------------------------------------
+# 4) Run SIMPER
+# -------------------------------------------------------------
+# comm_mat: rows = sites, columns = species
+# site_meta$Habitat: grouping factor
+sim <- simper(comm_mat, site_meta$Habitat, permutations = 999)
+
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(tibble)
+
+# -------------------------------------------------------------
+# 1) Fit species vectors onto NMDS
+# -------------------------------------------------------------
+# nmds = your previously computed metaMDS object
+# comm_mat = site x species abundance matrix
+env_sp <- envfit(nmds, comm_mat, permutations = 999)
+
+# -------------------------------------------------------------
+# 2) Extract species scores and statistics
+# -------------------------------------------------------------
+sp_scores <- as.data.frame(scores(env_sp, display = "vectors")) %>%
+  rownames_to_column("Species") %>%
+  mutate(
+    r2 = env_sp$vectors$r,
+    pval = env_sp$vectors$pvals
+  ) %>%
+  arrange(desc(r2))
+
+# Optional: only keep top species (e.g., r2 >= 0.3)
+top_sp <- sp_scores %>% filter(r2 >= 0.3)
+
+# View top species driving NMDS axes
+top_sp
+
+# -------------------------------------------------------------
+# 3) Plot NMDS with species vectors
+# -------------------------------------------------------------
+site_scores <- as.data.frame(scores(nmds, display = "sites")) %>%
+  mutate(Site = rownames(.)) %>%
+  left_join(site_meta, by = "Site")
+
+p_nmds_species_text <- ggplot() +
+  # Plot site points
+  geom_point(data = site_scores,
+             aes(x = NMDS1, y = NMDS2, color = Habitat),
+             size = 4, alpha = 0.8) +
+  # Add species names as text (no arrows)
+  geom_text(data = top_sp,
+            aes(x = NMDS1, y = NMDS2, label = Species),
+            size = 3, vjust = -0.5, color = "black") +
+  labs(
+    x = "NMDS1", y = "NMDS2",
+    title = ""
+  ) +
+  theme_bw() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    legend.position = "right"
+  )
+
+print(p_nmds_species_text)
+
+# -------------------------------------------------------------
+# 5) Summarize SIMPER results
+# -------------------------------------------------------------
+sim_summary <- summary(sim)
+
+# -------------------------------------------------------------
+# 6) Extract top species per habitat pair
+# -------------------------------------------------------------
+top_species <- lapply(sim_summary, function(x) {
+  as.data.frame(x) %>%
+    rownames_to_column("Species") %>%
+    arrange(desc(average)) %>%  # use 'average' column for contribution
+    slice(1:10)                  # top 10 contributors
+})
+
+# Combine into one table with habitat comparison info
+top_species_all <- bind_rows(lapply(names(top_species), function(nm) {
+  top_species[[nm]] %>% mutate(HabitatComparison = nm)
+}))
+
+# View top species driving differences
+top_species_all
+
+# -------------------------------------------------------------
+# 7) OPTIONAL: Plot top species per habitat pair
+# -------------------------------------------------------------
+ggplot(top_species_all, aes(x = reorder(Species, average), y = average, fill = HabitatComparison)) +
+  geom_col() +
+  coord_flip() +
+  facet_wrap(~ HabitatComparison, scales = "free_y") +
+  labs(title = "",
+       x = "Species",
+       y = "Average contribution to dissimilarity") +
+  theme_bw() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
 ```
 
 
